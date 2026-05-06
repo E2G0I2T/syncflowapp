@@ -13,7 +13,7 @@ import Animated, {
 import {
   GestureDetector,
   Gesture,
-  TouchableOpacity,   // RN의 TouchableOpacity 대신 RNGH 것 사용
+  TouchableOpacity,
 } from 'react-native-gesture-handler';
 import type { SharedValue } from 'react-native-reanimated';
 import { ColumnId, DropPayload } from '../types';
@@ -32,6 +32,7 @@ interface CardProps {
   onEdgeHold: (direction: 'left' | 'right' | null) => void;
   onDragStart: (content: string, x: number, y: number) => void;
   onDragMove: (x: number, y: number) => void;
+  onCardPress: () => void;   // 카드 본문 탭 → 상세 모달
   scrollDelta: SharedValue<number>;
 }
 
@@ -100,16 +101,14 @@ const DropdownMenu = ({
 const DraggableCard = ({
   id, content, columnId,
   onDrop, onStatusChange, onEdgeHold,
-  onDragStart, onDragMove,
+  onDragStart, onDragMove, onCardPress,
   scrollDelta,
 }: CardProps) => {
   const deleteTask = useBoardStore((s) => s.deleteTask);
 
   const isPressed              = useSharedValue(false);
   const scrollDeltaAtDragStart = useSharedValue(0);
-
-  // 메뉴 버튼이 눌린 상태인지 추적 (워크렛에서 읽기 위해 SharedValue)
-  const menuTouched = useSharedValue(false);
+  const menuTouched            = useSharedValue(false);
 
   const [menuVisible, setMenuVisible]   = useState(false);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
@@ -119,7 +118,7 @@ const DraggableCard = ({
 
   // ── 가장자리 감지 ──────────────────────────────────────────────────────────
   const checkEdge = (absoluteX: number) => {
-    if (absoluteX < EDGE_ZONE)                    triggerEdge('left');
+    if (absoluteX < EDGE_ZONE)                     triggerEdge('left');
     else if (absoluteX > SCREEN_WIDTH - EDGE_ZONE) triggerEdge('right');
     else                                            cancelEdge();
   };
@@ -140,14 +139,13 @@ const DraggableCard = ({
   // ── 드래그 제스처 ──────────────────────────────────────────────────────────
   const panGesture = Gesture.Pan()
     .onBegin((event) => {
-      // 메뉴 버튼이 눌린 상태면 드래그 전체 무시
       if (menuTouched.value) return;
       isPressed.value = true;
       scrollDeltaAtDragStart.value = scrollDelta.value;
       runOnJS(onDragStart)(content, event.absoluteX, event.absoluteY);
     })
     .onUpdate((event) => {
-      if (!isPressed.value) return;   // onBegin에서 막힌 경우 업데이트도 무시
+      if (!isPressed.value) return;
       runOnJS(checkEdge)(event.absoluteX);
       runOnJS(onDragMove)(event.absoluteX, event.absoluteY);
     })
@@ -159,8 +157,16 @@ const DraggableCard = ({
       runOnJS(onDrop)({ taskId: id, absoluteX: event.absoluteX, fromCol: columnId });
     });
 
+  // ── 카드 본문 탭 제스처 → 상세 모달 ────────────────────────────────────────
+  const cardTapGesture = Gesture.Tap()
+    .onBegin(() => { menuTouched.value = true; })
+    .onEnd(() => { runOnJS(onCardPress)(); })
+    .onFinalize(() => { menuTouched.value = false; });
+
+  // 카드 본문: 탭이 팬보다 우선
+  const cardGesture = Gesture.Exclusive(cardTapGesture, panGesture);
+
   // ── 메뉴 버튼 탭 제스처 ────────────────────────────────────────────────────
-  // Tap 제스처로 메뉴 버튼을 감싸고 Pan보다 우선순위를 높임
   const menuButtonRef = useRef<View>(null);
 
   const openMenu = () => {
@@ -173,38 +179,30 @@ const DraggableCard = ({
     });
   };
 
-  const tapGesture = Gesture.Tap()
-    .onBegin(() => {
-      // 탭 시작 시 Pan이 활성화되지 않도록 플래그 설정
-      menuTouched.value = true;
-    })
-    .onEnd(() => {
-      runOnJS(openMenu)();
-    })
-    .onFinalize(() => {
-      // 탭 종료(성공/실패 무관) 후 플래그 해제
-      menuTouched.value = false;
-    });
+  const menuTapGesture = Gesture.Tap()
+    .onBegin(() => { menuTouched.value = true; })
+    .onEnd(() => { runOnJS(openMenu)(); })
+    .onFinalize(() => { menuTouched.value = false; });
 
-  // Pan과 Tap을 Exclusive로 조합 → 탭이 인식되면 Pan은 실행 안 됨
-  const exclusiveGesture = Gesture.Exclusive(tapGesture, panGesture);
+  const menuGesture = Gesture.Exclusive(menuTapGesture, panGesture);
 
   // ── 원본 카드 스타일 ────────────────────────────────────────────────────────
   const animatedStyle = useAnimatedStyle(() => ({
-    opacity:    isPressed.value ? 0.25 : 1,
-    transform:  [{ scale: withSpring(isPressed.value ? 0.97 : 1) }],
+    opacity:         isPressed.value ? 0.25 : 1,
+    transform:       [{ scale: withSpring(isPressed.value ? 0.97 : 1) }],
     backgroundColor: 'white',
   }));
 
   return (
     <>
-      <GestureDetector gesture={panGesture}>
+      {/* 카드 전체를 cardGesture로 감싸되, 메뉴 버튼은 내부에서 별도 제스처 */}
+      <GestureDetector gesture={cardGesture}>
         <Animated.View style={[styles.card, animatedStyle]}>
           <View style={styles.cardContent}>
             <Text style={styles.text}>{content}</Text>
 
-            {/* 메뉴 버튼만 별도 GestureDetector로 감싸서 Tap 처리 */}
-            <GestureDetector gesture={exclusiveGesture}>
+            {/* 메뉴 버튼: 별도 GestureDetector */}
+            <GestureDetector gesture={menuGesture}>
               <Animated.View
                 ref={menuButtonRef as any}
                 style={styles.menuButton}

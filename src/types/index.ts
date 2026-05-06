@@ -1,10 +1,20 @@
 // types/index.ts
 
+export interface Label {
+  id: string;
+  text: string;
+  color: string;
+}
+
 export interface Task {
   id: string;
-  content: string;
-  description?: string;   // 나중에 카드 상세 모달용
-  createdAt: number;      // 생성 타임스탬프 (정렬, 로그 대비)
+  content: string;        // 카드 제목
+  description?: string;   // 리치 텍스트 HTML (pell-rich-editor 출력)
+  assignee?: string;      // 담당자 (자유 입력)
+  startDate?: string;     // 'YYYY-MM-DD'
+  dueDate?: string;       // 'YYYY-MM-DD'
+  labels?: Label[];       // 카테고리 라벨 배열
+  createdAt: number;
 }
 
 export type ColumnId = 'todo' | 'doing' | 'done' | 'archive';
@@ -15,17 +25,14 @@ export interface Column {
   color: string;
 }
 
-// 보드 전체 상태 타입
 export type TaskMap = Record<ColumnId, Task[]>;
 
-// 드래그앤드롭 이벤트 타입
 export interface DropPayload {
   taskId: string;
   absoluteX: number;
   fromCol: ColumnId;
 }
 
-// 상태 변경 이벤트 타입
 export interface StatusChangePayload {
   taskId: string;
   fromCol: ColumnId;

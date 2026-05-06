@@ -6,8 +6,10 @@ import {
 } from 'react-native';
 import { useSharedValue } from 'react-native-reanimated';
 import DraggableCard from '../components/DraggableCard';
+import AddCardInput from '../components/AddCardInput';
+import CardDetailModal from '../components/CardDetailModal';
 import { useBoardStore, COLUMNS } from '../store/useBoardStore';
-import { ColumnId, DropPayload } from '../types';
+import { ColumnId, DropPayload, Task } from '../types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const COLUMN_WIDTH  = SCREEN_WIDTH * 0.8;
@@ -16,10 +18,9 @@ const COLUMN_STRIDE = COLUMN_WIDTH + 20;
 const AUTO_SCROLL_STEP         = COLUMN_STRIDE;
 const AUTO_SCROLL_REPEAT_DELAY = 1000;
 
-// 드래그 중인 카드 오버레이 정보
 interface DragOverlay {
   content: string;
-  x: number;   // 화면 절대 좌표
+  x: number;
   y: number;
 }
 
@@ -31,10 +32,15 @@ const BoardScreen = () => {
   const scrollX       = useRef(0);
   const columnLayouts = useRef<Record<string, { start: number; end: number }>>({});
   const maxScrollX    = (COLUMNS.length - 1) * COLUMN_STRIDE;
+  const scrollDelta   = useSharedValue(0);
 
-  const scrollDelta = useSharedValue(0);
+  // [2번 수정] 컬럼별 세로 ScrollView ref — AddCardInput이 스크롤 제어에 사용
+  const columnScrollRefs = useRef<Record<ColumnId, React.RefObject<ScrollView>>>(
+    Object.fromEntries(COLUMNS.map((col) => [col.id, React.createRef<ScrollView>()])) as
+      Record<ColumnId, React.RefObject<ScrollView>>
+  );
 
-  // 자동 스크롤
+  // ── 자동 스크롤 ─────────────────────────────────────────────────────────────
   const autoScrollTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoScrollActive    = useRef(false);
   const autoScrollDirection = useRef<'left' | 'right' | null>(null);
@@ -84,9 +90,7 @@ const BoardScreen = () => {
     columnLayouts.current[colId] = { start: x, end: x + width };
   };
 
-  // ── 오버레이 상태 ─────────────────────────────────────────────────────────
-  // overlay: 화면에 떠 있는 카드 ghost
-  // pendingDrop: 오버레이가 사라진 후 실행할 moveTask 인자
+  // ── 드래그 오버레이 ──────────────────────────────────────────────────────────
   const [overlay, setOverlay] = useState<DragOverlay | null>(null);
   const pendingDrop = useRef<{ taskId: string; fromCol: ColumnId; toCol: ColumnId } | null>(null);
 
@@ -98,36 +102,40 @@ const BoardScreen = () => {
     setOverlay((prev) => prev ? { ...prev, x, y } : null);
   }, []);
 
-  // 드롭: 오버레이를 먼저 제거 → 그 다음 프레임에 moveTask 실행
-  // 이렇게 하면 원본 카드가 리렌더되기 전에 오버레이가 사라져서
-  // "카드가 두 곳에 동시에 보이거나 사라지는" 현상이 없어짐
   const onDrop = useCallback(({ taskId, absoluteX, fromCol }: DropPayload) => {
     stopAutoScroll();
-
     const actualX = absoluteX + scrollX.current;
     let toCol: ColumnId | '' = '';
     Object.entries(columnLayouts.current).forEach(([id, layout]) => {
       if (actualX >= layout.start && actualX <= layout.end) toCol = id as ColumnId;
     });
-
     if (toCol && toCol !== fromCol) {
-      // 이동이 필요한 경우: pendingDrop에 저장해두고 오버레이 제거
       pendingDrop.current = { taskId, fromCol, toCol: toCol as ColumnId };
     }
-
-    // 오버레이 제거 (setState → 다음 렌더 사이클)
     setOverlay(null);
   }, []);
 
-  // overlay가 null이 되는 렌더 직후 pendingDrop 실행
-  // useEffect 대신 렌더 중 처리하면 flicker가 없음
   if (overlay === null && pendingDrop.current) {
     const { taskId, fromCol, toCol } = pendingDrop.current;
     pendingDrop.current = null;
-    // 동기 실행하면 렌더 중 setState가 되므로 microtask로 밀어냄
     Promise.resolve().then(() => moveTask(taskId, fromCol, toCol));
   }
 
+  // ── 카드 상세 모달 ───────────────────────────────────────────────────────────
+  const [selectedTask,     setSelectedTask]     = useState<Task | null>(null);
+  const [selectedColumnId, setSelectedColumnId] = useState<ColumnId | null>(null);
+
+  const handleCardPress = useCallback((task: Task, colId: ColumnId) => {
+    setSelectedTask(task);
+    setSelectedColumnId(colId);
+  }, []);
+
+  const handleModalClose = useCallback(() => {
+    setSelectedTask(null);
+    setSelectedColumnId(null);
+  }, []);
+
+  // ── 렌더 ─────────────────────────────────────────────────────────────────
   return (
     <View style={styles.container}>
       {/* 상단 점프 탭 */}
@@ -159,11 +167,19 @@ const BoardScreen = () => {
             onLayout={(e) => handleLayout(col.id, e)}
             style={styles.column}
           >
+            {/* 컬럼 헤더 */}
             <View style={[styles.header, { backgroundColor: col.color }]}>
               <Text style={styles.headerText}>{col.title}</Text>
               <Text style={styles.headerCount}>{tasks[col.id].length}</Text>
             </View>
-            <ScrollView style={styles.cardList} showsVerticalScrollIndicator={false}>
+
+            {/* 카드 목록 + 카드 추가 */}
+            <ScrollView
+              ref={columnScrollRefs.current[col.id]}
+              style={styles.cardList}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
               {tasks[col.id].map((task) => (
                 <DraggableCard
                   key={task.id}
@@ -174,30 +190,40 @@ const BoardScreen = () => {
                   onEdgeHold={handleEdgeHold}
                   onDragStart={handleDragStart}
                   onDragMove={handleDragMove}
+                  onCardPress={() => handleCardPress(task, col.id)}
                   scrollDelta={scrollDelta}
                 />
               ))}
+
+              {/* [2번 수정] columnScrollRef 전달 */}
+              <AddCardInput
+                columnId={col.id}
+                columnScrollRef={columnScrollRefs.current[col.id]}
+              />
             </ScrollView>
           </View>
         ))}
       </ScrollView>
 
-      {/* 드래그 오버레이: ScrollView 바깥, 최상단에 렌더 */}
+      {/* 드래그 오버레이 */}
       {overlay && (
         <View
           pointerEvents="none"
           style={[
             styles.overlay,
-            {
-              // 손가락 위치 기준으로 카드 중앙이 오도록 보정
-              top:  overlay.y - 28,
-              left: overlay.x - (COLUMN_WIDTH / 2),
-            },
+            { top: overlay.y - 28, left: overlay.x - (COLUMN_WIDTH / 2) },
           ]}
         >
           <Text style={styles.overlayText}>{overlay.content}</Text>
         </View>
       )}
+
+      {/* 카드 상세 모달 */}
+      <CardDetailModal
+        task={selectedTask}
+        columnId={selectedColumnId}
+        onClose={handleModalClose}
+      />
     </View>
   );
 };
@@ -240,8 +266,6 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   cardList: { padding: 10 },
-
-  // 오버레이 카드 스타일
   overlay: {
     position: 'absolute',
     width: COLUMN_WIDTH - 20,
