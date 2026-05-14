@@ -1,9 +1,17 @@
 // components/CardDetailModal.tsx
 import React, { useRef, useState, useEffect } from 'react';
 import {
-  View, Text, TextInput, TouchableOpacity,
-  StyleSheet, Modal, ScrollView,
-  KeyboardAvoidingView, Platform, Alert, StatusBar,
+  View,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  StyleSheet,
+  Modal,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
+  Alert,
+  StatusBar,
 } from 'react-native';
 import {
   RichEditor,
@@ -12,9 +20,10 @@ import {
 } from 'react-native-pell-rich-editor';
 import { Task, Label, ColumnId } from '../types';
 import { useBoardStore, LABEL_PRESETS } from '../store/useBoardStore';
+import DateTimePicker from '@react-native-community/datetimepicker';
 
-const generateId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-const isValidDate = (s: string) => /^\d{4}-\d{2}-\d{2}$/.test(s);
+const generateId = () =>
+  `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
 
 // [1번 수정] Android 상태바 높이를 동적으로 가져와 헤더 상단 여백 계산
 const STATUS_BAR_HEIGHT = StatusBar.currentHeight ?? 24;
@@ -27,14 +36,16 @@ interface Props {
 }
 
 const CardDetailModal = ({ task, columnId, onClose }: Props) => {
-  const updateTask = useBoardStore((s) => s.updateTask);
-  const deleteTask = useBoardStore((s) => s.deleteTask);
+  const updateTask = useBoardStore(s => s.updateTask);
+  const deleteTask = useBoardStore(s => s.deleteTask);
+  const [showStartPicker, setShowStartPicker] = useState(false);
+  const [showDuePicker, setShowDuePicker] = useState(false);
 
-  const [title,     setTitle]     = useState('');
-  const [assignee,  setAssignee]  = useState('');
+  const [title, setTitle] = useState('');
+  const [assignee, setAssignee] = useState('');
   const [startDate, setStartDate] = useState('');
-  const [dueDate,   setDueDate]   = useState('');
-  const [labels,    setLabels]    = useState<Label[]>([]);
+  const [dueDate, setDueDate] = useState('');
+  const [labels, setLabels] = useState<Label[]>([]);
 
   const richEditor = useRef<RichEditor>(null);
 
@@ -48,37 +59,34 @@ const CardDetailModal = ({ task, columnId, onClose }: Props) => {
     setTimeout(() => {
       richEditor.current?.setContentHTML(task.description ?? '');
     }, 300);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [task?.id]);
 
   if (!task || !columnId) return null;
 
   const toggleLabel = (preset: Omit<Label, 'id'>) => {
-    setLabels((prev) => {
-      const exists = prev.find((l) => l.text === preset.text);
-      if (exists) return prev.filter((l) => l.text !== preset.text);
+    setLabels(prev => {
+      const exists = prev.find(l => l.text === preset.text);
+      if (exists) return prev.filter(l => l.text !== preset.text);
       return [...prev, { id: generateId(), ...preset }];
     });
   };
 
-  const isLabelActive = (text: string) => labels.some((l) => l.text === text);
+  const isLabelActive = (text: string) => labels.some(l => l.text === text);
 
   const handleSave = () => {
-    if (!title.trim()) { Alert.alert('알림', '제목을 입력해주세요.'); return; }
-    if (startDate && !isValidDate(startDate)) {
-      Alert.alert('알림', '시작일 형식을 확인해주세요. (YYYY-MM-DD)'); return;
+    if (!title.trim()) {
+      Alert.alert('알림', '제목을 입력해주세요.');
+      return;
     }
-    if (dueDate && !isValidDate(dueDate)) {
-      Alert.alert('알림', '마감일 형식을 확인해주세요. (YYYY-MM-DD)'); return;
-    }
-    richEditor.current?.getContentHtml().then((html) => {
+    richEditor.current?.getContentHtml().then(html => {
       updateTask(task.id, columnId, {
-        content:     title.trim(),
+        content: title.trim(),
         description: html,
-        assignee:    assignee.trim() || undefined,
-        startDate:   startDate || undefined,
-        dueDate:     dueDate   || undefined,
-        labels:      labels.length ? labels : undefined,
+        assignee: assignee.trim() || undefined,
+        startDate: startDate || undefined,
+        dueDate: dueDate || undefined,
+        labels: labels.length ? labels : undefined,
       });
       onClose();
     });
@@ -87,34 +95,53 @@ const CardDetailModal = ({ task, columnId, onClose }: Props) => {
   const handleDelete = () => {
     Alert.alert('카드 삭제', '정말 삭제할까요?', [
       { text: '취소', style: 'cancel' },
-      { text: '삭제', style: 'destructive',
-        onPress: () => { deleteTask(task.id, columnId); onClose(); } },
+      {
+        text: '삭제',
+        style: 'destructive',
+        onPress: () => {
+          deleteTask(task.id, columnId);
+          onClose();
+        },
+      },
     ]);
   };
 
-  const getLabelChipStyle = (active: boolean, color: string) => ([
+  const getLabelChipStyle = (active: boolean, color: string) => [
     styles.labelChip,
     active ? { backgroundColor: color } : styles.labelChipInactive,
-  ]);
+  ];
 
-  const getLabelTextStyle = (active: boolean) => ([
+  const getLabelTextStyle = (active: boolean) => [
     styles.labelChipText,
     active ? styles.labelChipTextActive : styles.labelChipTextInactive,
-  ]);
+  ];
 
   return (
-    <Modal visible={!!task} animationType="slide" onRequestClose={onClose} statusBarTranslucent>
+    <Modal
+      visible={!!task}
+      animationType="slide"
+      onRequestClose={onClose}
+      statusBarTranslucent
+    >
       <KeyboardAvoidingView
         style={styles.root}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         {/* [1번 수정] 헤더 paddingTop을 STATUS_BAR_HEIGHT 기반으로 */}
         <View style={[styles.header, { paddingTop: HEADER_PADDING_TOP }]}>
-          <TouchableOpacity onPress={onClose} style={styles.headerBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+          <TouchableOpacity
+            onPress={onClose}
+            style={styles.headerBtn}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
             <Text style={styles.headerBtnText}>✕</Text>
           </TouchableOpacity>
           <Text style={styles.headerTitle}>카드 상세</Text>
-          <TouchableOpacity onPress={handleSave} style={styles.headerBtn} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+          <TouchableOpacity
+            onPress={handleSave}
+            style={styles.headerBtn}
+            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+          >
             <Text style={[styles.headerBtnText, styles.saveText]}>저장</Text>
           </TouchableOpacity>
         </View>
@@ -152,30 +179,68 @@ const CardDetailModal = ({ task, columnId, onClose }: Props) => {
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>일정</Text>
             <View style={styles.dateRow}>
+              {/* 시작일 */}
               <View style={styles.dateField}>
                 <Text style={styles.dateLabel}>시작일</Text>
-                <TextInput
+                <TouchableOpacity
                   style={styles.dateInput}
-                  value={startDate}
-                  onChangeText={setStartDate}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor="#bbb"
-                  keyboardType="numeric"
-                  maxLength={10}
-                />
+                  onPress={() => setShowStartPicker(true)}
+                >
+                  <Text
+                    style={startDate ? styles.dateText : styles.datePlaceholder}
+                  >
+                    {startDate || 'YYYY-MM-DD'}
+                  </Text>
+                </TouchableOpacity>
+                {showStartPicker && (
+                  <DateTimePicker
+                    value={startDate ? new Date(startDate) : new Date()}
+                    mode="date"
+                    display="default"
+                    onChange={(_event, date) => {
+                      setShowStartPicker(false);
+                      if (date) {
+                        const yyyy = date.getFullYear();
+                        const mm = String(date.getMonth() + 1).padStart(2, '0');
+                        const dd = String(date.getDate()).padStart(2, '0');
+                        setStartDate(`${yyyy}-${mm}-${dd}`);
+                      }
+                    }}
+                  />
+                )}
               </View>
+
               <Text style={styles.dateSep}>→</Text>
+
+              {/* 마감일 */}
               <View style={styles.dateField}>
                 <Text style={styles.dateLabel}>마감일</Text>
-                <TextInput
+                <TouchableOpacity
                   style={styles.dateInput}
-                  value={dueDate}
-                  onChangeText={setDueDate}
-                  placeholder="YYYY-MM-DD"
-                  placeholderTextColor="#bbb"
-                  keyboardType="numeric"
-                  maxLength={10}
-                />
+                  onPress={() => setShowDuePicker(true)}
+                >
+                  <Text
+                    style={dueDate ? styles.dateText : styles.datePlaceholder}
+                  >
+                    {dueDate || 'YYYY-MM-DD'}
+                  </Text>
+                </TouchableOpacity>
+                {showDuePicker && (
+                  <DateTimePicker
+                    value={dueDate ? new Date(dueDate) : new Date()}
+                    mode="date"
+                    display="default"
+                    onChange={(_event, date) => {
+                      setShowDuePicker(false);
+                      if (date) {
+                        const yyyy = date.getFullYear();
+                        const mm = String(date.getMonth() + 1).padStart(2, '0');
+                        const dd = String(date.getDate()).padStart(2, '0');
+                        setDueDate(`${yyyy}-${mm}-${dd}`);
+                      }
+                    }}
+                  />
+                )}
               </View>
             </View>
           </View>
@@ -184,7 +249,7 @@ const CardDetailModal = ({ task, columnId, onClose }: Props) => {
           <View style={styles.section}>
             <Text style={styles.sectionLabel}>카테고리 라벨</Text>
             <View style={styles.labelRow}>
-              {LABEL_PRESETS.map((preset) => {
+              {LABEL_PRESETS.map(preset => {
                 const active = isLabelActive(preset.text);
                 return (
                   <TouchableOpacity
@@ -205,11 +270,17 @@ const CardDetailModal = ({ task, columnId, onClose }: Props) => {
             <RichToolbar
               editor={richEditor}
               actions={[
-                actions.setBold, actions.setItalic, actions.setUnderline,
-                actions.setStrikethrough, actions.insertBulletsList,
-                actions.insertOrderedList, actions.insertLink,
-                actions.insertImage, actions.setTextColor,
-                actions.undo, actions.redo,
+                actions.setBold,
+                actions.setItalic,
+                actions.setUnderline,
+                actions.setStrikethrough,
+                actions.insertBulletsList,
+                actions.insertOrderedList,
+                actions.insertLink,
+                actions.insertImage,
+                actions.setTextColor,
+                actions.undo,
+                actions.redo,
               ]}
               style={styles.toolbar}
               iconTint="#555"
@@ -260,12 +331,12 @@ const styles = StyleSheet.create({
     borderBottomColor: '#eee',
     elevation: 3,
   },
-  headerBtn:     { minWidth: 44, alignItems: 'center', paddingVertical: 8 },
+  headerBtn: { minWidth: 44, alignItems: 'center', paddingVertical: 8 },
   headerBtnText: { fontSize: 18, color: '#555' },
-  headerTitle:   { fontSize: 17, fontWeight: 'bold', color: '#222' },
-  saveText:      { color: '#4C6EF5', fontWeight: 'bold', fontSize: 16 },
+  headerTitle: { fontSize: 17, fontWeight: 'bold', color: '#222' },
+  saveText: { color: '#4C6EF5', fontWeight: 'bold', fontSize: 16 },
 
-  scroll:        { flex: 1 },
+  scroll: { flex: 1 },
   scrollContent: { padding: 16 },
 
   section: {
@@ -301,26 +372,35 @@ const styles = StyleSheet.create({
     borderBottomColor: '#eee',
   },
 
-  dateRow:   { flexDirection: 'row', alignItems: 'center' },
+  dateRow: { flexDirection: 'row', alignItems: 'center' },
   dateField: { flex: 1 },
   dateLabel: { fontSize: 11, color: '#aaa', marginBottom: 4 },
   dateInput: {
-    fontSize: 14,
-    color: '#333',
-    paddingVertical: 6,
     borderWidth: 1,
     borderColor: '#eee',
     borderRadius: 6,
     paddingHorizontal: 8,
-    textAlign: 'center',
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   dateSep: { marginHorizontal: 10, color: '#aaa', fontSize: 16 },
+  dateText: {
+    fontSize: 14,
+    color: '#333',
+    textAlign: 'center',
+  },
+  datePlaceholder: {
+    fontSize: 14,
+    color: '#bbb',
+    textAlign: 'center',
+  },
 
-  labelRow:              { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  labelChip:             { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
-  labelChipInactive:     { backgroundColor: '#f0f0f0' },
-  labelChipText:         { fontSize: 13, fontWeight: '500' },
-  labelChipTextActive:   { color: 'white' },
+  labelRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  labelChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  labelChipInactive: { backgroundColor: '#f0f0f0' },
+  labelChipText: { fontSize: 13, fontWeight: '500' },
+  labelChipTextActive: { color: 'white' },
   labelChipTextInactive: { color: '#555' },
 
   toolbar: {
@@ -351,7 +431,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   deleteButtonText: { color: '#e03131', fontWeight: '600', fontSize: 15 },
-  bottomSpacer:     { height: 40 },
+  bottomSpacer: { height: 40 },
 });
 
 export default CardDetailModal;
