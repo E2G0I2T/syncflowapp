@@ -1,8 +1,9 @@
-// screens/BoardScreen.tsx
-import React, { useRef, useState, useCallback } from 'react';
+// src/screens/BoardScreen.tsx
+import React, { useRef, useState, useCallback, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView,
   Dimensions, LayoutChangeEvent, TouchableOpacity,
+  ActivityIndicator,
 } from 'react-native';
 import { useSharedValue } from 'react-native-reanimated';
 import DraggableCard from '../components/DraggableCard';
@@ -15,6 +16,9 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const COLUMN_WIDTH  = SCREEN_WIDTH * 0.8;
 const COLUMN_STRIDE = COLUMN_WIDTH + 20;
 
+// 오버레이 카드 높이 절반 — 손가락 위치가 카드 중앙에 오도록
+const OVERLAY_HALF_HEIGHT = 100;
+
 const AUTO_SCROLL_STEP         = COLUMN_STRIDE;
 const AUTO_SCROLL_REPEAT_DELAY = 1000;
 
@@ -24,9 +28,23 @@ interface DragOverlay {
   y: number;
 }
 
-const BoardScreen = () => {
-  const tasks    = useBoardStore((s) => s.tasks);
-  const moveTask = useBoardStore((s) => s.moveTask);
+const BoardScreen = ({ route, navigation }: any) => {
+  const { boardId, boardTitle } = route.params ?? {};
+
+  const tasks     = useBoardStore((s) => s.tasks);
+  const moveTask  = useBoardStore((s) => s.moveTask);
+  const loadBoard = useBoardStore((s) => s.loadBoard);
+  const isLoading = useBoardStore((s) => s.isLoading);
+
+  useEffect(() => {
+    if (boardId) loadBoard(boardId);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardId]);
+
+  useEffect(() => {
+    navigation?.setOptions?.({ title: boardTitle ?? 'SyncFlow 보드' });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [boardTitle]);
 
   const scrollViewRef = useRef<ScrollView>(null);
   const scrollX       = useRef(0);
@@ -34,7 +52,6 @@ const BoardScreen = () => {
   const maxScrollX    = (COLUMNS.length - 1) * COLUMN_STRIDE;
   const scrollDelta   = useSharedValue(0);
 
-  // [2번 수정] 컬럼별 세로 ScrollView ref — AddCardInput이 스크롤 제어에 사용
   const columnScrollRefs = useRef<Record<ColumnId, React.RefObject<ScrollView>>>(
     Object.fromEntries(COLUMNS.map((col) => [col.id, React.createRef<ScrollView>()])) as
       Record<ColumnId, React.RefObject<ScrollView>>
@@ -94,8 +111,15 @@ const BoardScreen = () => {
   const [overlay, setOverlay] = useState<DragOverlay | null>(null);
   const pendingDrop = useRef<{ taskId: string; fromCol: ColumnId; toCol: ColumnId } | null>(null);
 
-  const handleDragStart = useCallback((content: string, x: number, y: number) => {
-    setOverlay({ content, x, y });
+  // onDragStart: cardTopY 인자를 받지만 사용하지 않음
+  // 오버레이는 단순히 손가락 위치 중심으로 표시
+  const handleDragStart = useCallback((
+    content: string,
+    fingerX: number,
+    fingerY: number,
+    _cardTopY: number,
+  ) => {
+    setOverlay({ content, x: fingerX, y: fingerY });
   }, []);
 
   const handleDragMove = useCallback((x: number, y: number) => {
@@ -135,10 +159,17 @@ const BoardScreen = () => {
     setSelectedColumnId(null);
   }, []);
 
-  // ── 렌더 ─────────────────────────────────────────────────────────────────
+  if (isLoading) {
+    return (
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color="#4C6EF5" />
+        <Text style={styles.loadingText}>보드 불러오는 중...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
-      {/* 상단 점프 탭 */}
       <View style={styles.tabBar}>
         {COLUMNS.map((col, index) => (
           <TouchableOpacity
@@ -151,7 +182,6 @@ const BoardScreen = () => {
         ))}
       </View>
 
-      {/* 메인 보드 */}
       <ScrollView
         ref={scrollViewRef}
         horizontal
@@ -167,13 +197,11 @@ const BoardScreen = () => {
             onLayout={(e) => handleLayout(col.id, e)}
             style={styles.column}
           >
-            {/* 컬럼 헤더 */}
             <View style={[styles.header, { backgroundColor: col.color }]}>
               <Text style={styles.headerText}>{col.title}</Text>
               <Text style={styles.headerCount}>{tasks[col.id].length}</Text>
             </View>
 
-            {/* 카드 목록 + 카드 추가 */}
             <ScrollView
               ref={columnScrollRefs.current[col.id]}
               style={styles.cardList}
@@ -194,8 +222,6 @@ const BoardScreen = () => {
                   scrollDelta={scrollDelta}
                 />
               ))}
-
-              {/* [2번 수정] columnScrollRef 전달 */}
               <AddCardInput
                 columnId={col.id}
                 columnScrollRef={columnScrollRefs.current[col.id]}
@@ -205,20 +231,23 @@ const BoardScreen = () => {
         ))}
       </ScrollView>
 
-      {/* 드래그 오버레이 */}
+      {/* 오버레이: 손가락 위치를 카드 중앙으로 맞춤
+          OVERLAY_HALF_HEIGHT만큼 위로 올려서 카드 중앙 = 손가락 위치 */}
       {overlay && (
         <View
           pointerEvents="none"
           style={[
-            styles.overlay,
-            { top: overlay.y - 28, left: overlay.x - (COLUMN_WIDTH / 2) },
+            styles.overlayCard,
+            {
+              top:  overlay.y - OVERLAY_HALF_HEIGHT,
+              left: overlay.x - (COLUMN_WIDTH / 2),
+            },
           ]}
         >
           <Text style={styles.overlayText}>{overlay.content}</Text>
         </View>
       )}
 
-      {/* 카드 상세 모달 */}
       <CardDetailModal
         task={selectedTask}
         columnId={selectedColumnId}
@@ -229,16 +258,17 @@ const BoardScreen = () => {
 };
 
 const styles = StyleSheet.create({
-  container:    { flex: 1, backgroundColor: '#f8f9fa' },
+  container:        { flex: 1, backgroundColor: '#f8f9fa' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  loadingText:      { marginTop: 12, color: '#888', fontSize: 15 },
   tabBar: {
     flexDirection: 'row',
     backgroundColor: '#fff',
-    paddingTop: 40,
     elevation: 4,
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
-  tabItem:      { flex: 1, alignItems: 'center', paddingBottom: 12, borderBottomWidth: 3 },
+  tabItem:      { flex: 1, alignItems: 'center', paddingVertical: 12, borderBottomWidth: 3 },
   tabText:      { fontWeight: 'bold', fontSize: 13, color: '#333' },
   boardContent: { padding: 10 },
   column: {
@@ -266,7 +296,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   cardList: { padding: 10 },
-  overlay: {
+  overlayCard: {
     position: 'absolute',
     width: COLUMN_WIDTH - 20,
     backgroundColor: 'white',
@@ -279,7 +309,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.22,
     shadowRadius: 12,
     elevation: 24,
-    opacity: 0.96,
+    opacity: 0.95,
   },
   overlayText: { fontSize: 15, color: '#333' },
 });

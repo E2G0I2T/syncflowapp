@@ -17,19 +17,17 @@ const AddCardInput = ({ columnId, columnScrollRef }: Props) => {
 
   const [open, setOpen]               = useState(false);
   const [text, setText]               = useState('');
-  const [spacerHeight, setSpacerHeight] = useState(0); // 키보드 높이만큼 하단 여백
+  const [spacerHeight, setSpacerHeight] = useState(0);
 
-  const inputRef     = useRef<TextInput>(null);
-  const containerRef = useRef<View>(null);
+  const inputRef          = useRef<TextInput>(null);
+  const containerRef      = useRef<View>(null);
   const keyboardHeightRef = useRef(0);
 
   useEffect(() => {
     const showSub = Keyboard.addListener('keyboardDidShow', (e: KeyboardEvent) => {
       keyboardHeightRef.current = e.endCoordinates.height;
       if (open) {
-        // 키보드가 올라오면 spacer를 키보드 높이로 세팅 → 스크롤 범위 확보
         setSpacerHeight(e.endCoordinates.height);
-        // spacer가 렌더된 후 스크롤
         setTimeout(() => scrollToInput(), 50);
       }
     });
@@ -47,10 +45,8 @@ const AddCardInput = ({ columnId, columnScrollRef }: Props) => {
   const scrollToInput = () => {
     if (!containerRef.current || !columnScrollRef.current) return;
     containerRef.current.measureLayout(
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      columnScrollRef.current as any,
+      columnScrollRef.current as unknown as React.ElementRef<typeof View>,
       (_x, y, _w, h) => {
-        // 입력창 하단이 키보드 바로 위에 오도록
         columnScrollRef.current?.scrollTo({ y: y + h + 16, animated: true });
       },
       () => {
@@ -110,8 +106,6 @@ const AddCardInput = ({ columnId, columnScrollRef }: Props) => {
           </TouchableOpacity>
         </View>
       </View>
-
-      {/* 키보드 높이만큼 빈 공간 추가 → 스크롤 범위 확보 */}
       {spacerHeight > 0 && <View style={{ height: spacerHeight }} />}
     </>
   );

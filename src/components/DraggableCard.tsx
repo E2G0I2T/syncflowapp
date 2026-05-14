@@ -3,6 +3,7 @@ import React, { useState, useRef } from 'react';
 import {
   StyleSheet, Text, View,
   Modal, Pressable, Dimensions,
+  TouchableOpacity as RNTouchableOpacity,
 } from 'react-native';
 import Animated, {
   useAnimatedStyle,
@@ -13,7 +14,6 @@ import Animated, {
 import {
   GestureDetector,
   Gesture,
-  TouchableOpacity,
 } from 'react-native-gesture-handler';
 import type { SharedValue } from 'react-native-reanimated';
 import { ColumnId, DropPayload } from '../types';
@@ -30,9 +30,9 @@ interface CardProps {
   onDrop: (payload: DropPayload) => void;
   onStatusChange: (taskId: string, fromCol: ColumnId, toCol: ColumnId) => void;
   onEdgeHold: (direction: 'left' | 'right' | null) => void;
-  onDragStart: (content: string, x: number, y: number) => void;
+  onDragStart: (content: string, fingerX: number, fingerY: number, cardTopY: number) => void;
   onDragMove: (x: number, y: number) => void;
-  onCardPress: () => void;   // 카드 본문 탭 → 상세 모달
+  onCardPress: () => void;
   scrollDelta: SharedValue<number>;
 }
 
@@ -62,34 +62,37 @@ const DropdownMenu = ({
           style={[styles.menuContainer, { top: anchorPosition.y, left: anchorPosition.x }]}
           onStartShouldSetResponder={() => true}
         >
-          <TouchableOpacity style={styles.menuItem} onPress={() => setShowSubMenu((p) => !p)}>
+          <RNTouchableOpacity
+            style={styles.menuItem}
+            onPress={() => setShowSubMenu((p) => !p)}
+          >
             <Text style={styles.menuItemText}>🔄 상태 변경</Text>
             <Text style={styles.menuItemArrow}>{showSubMenu ? '▲' : '▼'}</Text>
-          </TouchableOpacity>
+          </RNTouchableOpacity>
 
           {showSubMenu && (
             <View style={styles.subMenu}>
               {COLUMNS.filter((col) => col.id !== columnId).map((col) => (
-                <TouchableOpacity
+                <RNTouchableOpacity
                   key={col.id}
                   style={styles.subMenuItem}
                   onPress={() => { onStatusChange(col.id); handleClose(); }}
                 >
                   <View style={[styles.subMenuDot, { backgroundColor: col.color }]} />
                   <Text style={styles.subMenuItemText}>{col.title}</Text>
-                </TouchableOpacity>
+                </RNTouchableOpacity>
               ))}
             </View>
           )}
 
           <View style={styles.divider} />
 
-          <TouchableOpacity
+          <RNTouchableOpacity
             style={styles.menuItem}
             onPress={() => { onDelete(); handleClose(); }}
           >
             <Text style={[styles.menuItemText, styles.deleteText]}>🗑️ 카드 삭제</Text>
-          </TouchableOpacity>
+          </RNTouchableOpacity>
         </View>
       </Pressable>
     </Modal>
@@ -108,10 +111,15 @@ const DraggableCard = ({
 
   const isPressed              = useSharedValue(false);
   const scrollDeltaAtDragStart = useSharedValue(0);
-  const menuTouched            = useSharedValue(false);
 
   const [menuVisible, setMenuVisible]   = useState(false);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
+
+  const menuButtonRef = useRef<View>(null);
+  const cardRef       = useRef<View>(null);
+
+  // onLayout 시점에 측정해서 저장 — 롱프레스 시 비동기 지연 없이 즉시 사용
+  const cardAbsoluteY = useRef(0);
 
   const edgeTimer   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const currentEdge = useRef<'left' | 'right' | null>(null);
@@ -137,13 +145,17 @@ const DraggableCard = ({
   };
 
   // ── 드래그 제스처 ──────────────────────────────────────────────────────────
-  const panGesture = Gesture.Pan()
-    .onBegin((event) => {
-      if (menuTouched.value) return;
+  const longPressGesture = Gesture.LongPress()
+    .minDuration(300)
+    .onStart((event) => {
       isPressed.value = true;
       scrollDeltaAtDragStart.value = scrollDelta.value;
-      runOnJS(onDragStart)(content, event.absoluteX, event.absoluteY);
-    })
+      // onLayout에서 미리 저장한 값 사용 — 지연 없음
+      runOnJS(onDragStart)(content, event.absoluteX, event.absoluteY, cardAbsoluteY.current);
+    });
+
+  const panGesture = Gesture.Pan()
+    .averageTouches(true)
     .onUpdate((event) => {
       if (!isPressed.value) return;
       runOnJS(checkEdge)(event.absoluteX);
@@ -157,18 +169,15 @@ const DraggableCard = ({
       runOnJS(onDrop)({ taskId: id, absoluteX: event.absoluteX, fromCol: columnId });
     });
 
-  // ── 카드 본문 탭 제스처 → 상세 모달 ────────────────────────────────────────
-  const cardTapGesture = Gesture.Tap()
-    .onBegin(() => { menuTouched.value = true; })
-    .onEnd(() => { runOnJS(onCardPress)(); })
-    .onFinalize(() => { menuTouched.value = false; });
+  const dragGesture = Gesture.Simultaneous(longPressGesture, panGesture);
 
-  // 카드 본문: 탭이 팬보다 우선
-  const cardGesture = Gesture.Exclusive(cardTapGesture, panGesture);
+  const tapGesture = Gesture.Tap()
+    .maxDuration(250)
+    .onEnd(() => { runOnJS(onCardPress)(); });
 
-  // ── 메뉴 버튼 탭 제스처 ────────────────────────────────────────────────────
-  const menuButtonRef = useRef<View>(null);
+  const cardGesture = Gesture.Exclusive(tapGesture, dragGesture);
 
+  // ── 메뉴 버튼 ─────────────────────────────────────────────────────────────
   const openMenu = () => {
     menuButtonRef.current?.measureInWindow((x, y, _w, height) => {
       const menuWidth = 180;
@@ -180,13 +189,9 @@ const DraggableCard = ({
   };
 
   const menuTapGesture = Gesture.Tap()
-    .onBegin(() => { menuTouched.value = true; })
-    .onEnd(() => { runOnJS(openMenu)(); })
-    .onFinalize(() => { menuTouched.value = false; });
+    .onEnd(() => { runOnJS(openMenu)(); });
 
-  const menuGesture = Gesture.Exclusive(menuTapGesture, panGesture);
-
-  // ── 원본 카드 스타일 ────────────────────────────────────────────────────────
+  // ── 애니메이션 스타일 ──────────────────────────────────────────────────────
   const animatedStyle = useAnimatedStyle(() => ({
     opacity:         isPressed.value ? 0.25 : 1,
     transform:       [{ scale: withSpring(isPressed.value ? 0.97 : 1) }],
@@ -195,14 +200,21 @@ const DraggableCard = ({
 
   return (
     <>
-      {/* 카드 전체를 cardGesture로 감싸되, 메뉴 버튼은 내부에서 별도 제스처 */}
       <GestureDetector gesture={cardGesture}>
-        <Animated.View style={[styles.card, animatedStyle]}>
+        <Animated.View
+          ref={cardRef}
+          style={[styles.card, animatedStyle]}
+          onLayout={() => {
+            // 카드 레이아웃 확정 후 절대 y좌표 측정 & 저장
+            cardRef.current?.measureInWindow((_x, y) => {
+              cardAbsoluteY.current = y;
+            });
+          }}
+        >
           <View style={styles.cardContent}>
             <Text style={styles.text}>{content}</Text>
 
-            {/* 메뉴 버튼: 별도 GestureDetector */}
-            <GestureDetector gesture={menuGesture}>
+            <GestureDetector gesture={menuTapGesture}>
               <Animated.View
                 ref={menuButtonRef as any}
                 style={styles.menuButton}
