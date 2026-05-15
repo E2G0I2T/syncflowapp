@@ -1,8 +1,13 @@
 // src/screens/BoardScreen.tsx
 import React, { useRef, useState, useCallback, useEffect } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView,
-  Dimensions, LayoutChangeEvent, TouchableOpacity,
+  View,
+  Text,
+  StyleSheet,
+  ScrollView,
+  Dimensions,
+  LayoutChangeEvent,
+  TouchableOpacity,
   ActivityIndicator,
 } from 'react-native';
 import { useSharedValue } from 'react-native-reanimated';
@@ -13,13 +18,13 @@ import { useBoardStore, COLUMNS } from '../store/useBoardStore';
 import { ColumnId, DropPayload, Task } from '../types';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const COLUMN_WIDTH  = SCREEN_WIDTH * 0.8;
+const COLUMN_WIDTH = SCREEN_WIDTH * 0.8;
 const COLUMN_STRIDE = COLUMN_WIDTH + 20;
 
 // 오버레이 카드 높이 절반 — 손가락 위치가 카드 중앙에 오도록
 const OVERLAY_HALF_HEIGHT = 100;
 
-const AUTO_SCROLL_STEP         = COLUMN_STRIDE;
+const AUTO_SCROLL_STEP = COLUMN_STRIDE;
 const AUTO_SCROLL_REPEAT_DELAY = 1000;
 
 interface DragOverlay {
@@ -31,39 +36,53 @@ interface DragOverlay {
 const BoardScreen = ({ route, navigation }: any) => {
   const { boardId, boardTitle } = route.params ?? {};
 
-  const tasks     = useBoardStore((s) => s.tasks);
-  const moveTask  = useBoardStore((s) => s.moveTask);
-  const loadBoard = useBoardStore((s) => s.loadBoard);
-  const isLoading = useBoardStore((s) => s.isLoading);
+  const tasks = useBoardStore(s => s.tasks);
+  const moveTask = useBoardStore(s => s.moveTask);
+  const loadBoard = useBoardStore(s => s.loadBoard);
+  const isLoading = useBoardStore(s => s.isLoading);
+  const joinBoard = useBoardStore(s => s.joinBoard);
+  const leaveBoard = useBoardStore(s => s.leaveBoard);
 
   useEffect(() => {
-    if (boardId) loadBoard(boardId);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (boardId) {
+      loadBoard(boardId).then(() => {
+        joinBoard(boardId);
+      });
+    }
+    return () => {
+      leaveBoard();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boardId]);
 
   useEffect(() => {
     navigation?.setOptions?.({ title: boardTitle ?? 'SyncFlow 보드' });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [boardTitle]);
 
   const scrollViewRef = useRef<ScrollView>(null);
-  const scrollX       = useRef(0);
-  const columnLayouts = useRef<Record<string, { start: number; end: number }>>({});
-  const maxScrollX    = (COLUMNS.length - 1) * COLUMN_STRIDE;
-  const scrollDelta   = useSharedValue(0);
+  const scrollX = useRef(0);
+  const columnLayouts = useRef<Record<string, { start: number; end: number }>>(
+    {},
+  );
+  const maxScrollX = (COLUMNS.length - 1) * COLUMN_STRIDE;
+  const scrollDelta = useSharedValue(0);
 
-  const columnScrollRefs = useRef<Record<ColumnId, React.RefObject<ScrollView>>>(
-    Object.fromEntries(COLUMNS.map((col) => [col.id, React.createRef<ScrollView>()])) as
-      Record<ColumnId, React.RefObject<ScrollView>>
+  const columnScrollRefs = useRef<
+    Record<ColumnId, React.RefObject<ScrollView>>
+  >(
+    Object.fromEntries(
+      COLUMNS.map(col => [col.id, React.createRef<ScrollView>()]),
+    ) as Record<ColumnId, React.RefObject<ScrollView>>,
   );
 
   // ── 자동 스크롤 ─────────────────────────────────────────────────────────────
-  const autoScrollTimerRef  = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const autoScrollActive    = useRef(false);
+  const autoScrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const autoScrollActive = useRef(false);
   const autoScrollDirection = useRef<'left' | 'right' | null>(null);
 
   const stopAutoScroll = () => {
-    autoScrollActive.current    = false;
+    autoScrollActive.current = false;
     autoScrollDirection.current = null;
     if (autoScrollTimerRef.current) {
       clearTimeout(autoScrollTimerRef.current);
@@ -78,28 +97,41 @@ const BoardScreen = ({ route, navigation }: any) => {
     const step = dir === 'right' ? AUTO_SCROLL_STEP : -AUTO_SCROLL_STEP;
     const next = Math.min(maxScrollX, Math.max(0, scrollX.current + step));
     scrollViewRef.current?.scrollTo({ x: next, animated: false });
-    scrollX.current   = next;
+    scrollX.current = next;
     scrollDelta.value = next;
-    if (next <= 0 || next >= maxScrollX) { stopAutoScroll(); return; }
-    autoScrollTimerRef.current = setTimeout(scheduleNextScroll, AUTO_SCROLL_REPEAT_DELAY);
+    if (next <= 0 || next >= maxScrollX) {
+      stopAutoScroll();
+      return;
+    }
+    autoScrollTimerRef.current = setTimeout(
+      scheduleNextScroll,
+      AUTO_SCROLL_REPEAT_DELAY,
+    );
   };
 
   const handleEdgeHold = (direction: 'left' | 'right' | null) => {
-    if (!direction) { stopAutoScroll(); return; }
-    if (autoScrollActive.current && autoScrollDirection.current === direction) return;
+    if (!direction) {
+      stopAutoScroll();
+      return;
+    }
+    if (autoScrollActive.current && autoScrollDirection.current === direction)
+      return;
     stopAutoScroll();
-    autoScrollActive.current    = true;
+    autoScrollActive.current = true;
     autoScrollDirection.current = direction;
     scheduleNextScroll();
   };
 
   const handleScroll = (event: any) => {
-    scrollX.current   = event.nativeEvent.contentOffset.x;
+    scrollX.current = event.nativeEvent.contentOffset.x;
     scrollDelta.value = event.nativeEvent.contentOffset.x;
   };
 
   const jumpToColumn = (index: number) => {
-    scrollViewRef.current?.scrollTo({ x: index * COLUMN_STRIDE, animated: true });
+    scrollViewRef.current?.scrollTo({
+      x: index * COLUMN_STRIDE,
+      animated: true,
+    });
   };
 
   const handleLayout = (colId: string, event: LayoutChangeEvent) => {
@@ -109,21 +141,23 @@ const BoardScreen = ({ route, navigation }: any) => {
 
   // ── 드래그 오버레이 ──────────────────────────────────────────────────────────
   const [overlay, setOverlay] = useState<DragOverlay | null>(null);
-  const pendingDrop = useRef<{ taskId: string; fromCol: ColumnId; toCol: ColumnId } | null>(null);
+  const pendingDrop = useRef<{
+    taskId: string;
+    fromCol: ColumnId;
+    toCol: ColumnId;
+  } | null>(null);
 
   // onDragStart: cardTopY 인자를 받지만 사용하지 않음
   // 오버레이는 단순히 손가락 위치 중심으로 표시
-  const handleDragStart = useCallback((
-    content: string,
-    fingerX: number,
-    fingerY: number,
-    _cardTopY: number,
-  ) => {
-    setOverlay({ content, x: fingerX, y: fingerY });
-  }, []);
+  const handleDragStart = useCallback(
+    (content: string, fingerX: number, fingerY: number, _cardTopY: number) => {
+      setOverlay({ content, x: fingerX, y: fingerY });
+    },
+    [],
+  );
 
   const handleDragMove = useCallback((x: number, y: number) => {
-    setOverlay((prev) => prev ? { ...prev, x, y } : null);
+    setOverlay(prev => (prev ? { ...prev, x, y } : null));
   }, []);
 
   const onDrop = useCallback(({ taskId, absoluteX, fromCol }: DropPayload) => {
@@ -131,7 +165,8 @@ const BoardScreen = ({ route, navigation }: any) => {
     const actualX = absoluteX + scrollX.current;
     let toCol: ColumnId | '' = '';
     Object.entries(columnLayouts.current).forEach(([id, layout]) => {
-      if (actualX >= layout.start && actualX <= layout.end) toCol = id as ColumnId;
+      if (actualX >= layout.start && actualX <= layout.end)
+        toCol = id as ColumnId;
     });
     if (toCol && toCol !== fromCol) {
       pendingDrop.current = { taskId, fromCol, toCol: toCol as ColumnId };
@@ -146,8 +181,10 @@ const BoardScreen = ({ route, navigation }: any) => {
   }
 
   // ── 카드 상세 모달 ───────────────────────────────────────────────────────────
-  const [selectedTask,     setSelectedTask]     = useState<Task | null>(null);
-  const [selectedColumnId, setSelectedColumnId] = useState<ColumnId | null>(null);
+  const [selectedTask, setSelectedTask] = useState<Task | null>(null);
+  const [selectedColumnId, setSelectedColumnId] = useState<ColumnId | null>(
+    null,
+  );
 
   const handleCardPress = useCallback((task: Task, colId: ColumnId) => {
     setSelectedTask(task);
@@ -191,10 +228,10 @@ const BoardScreen = ({ route, navigation }: any) => {
         decelerationRate="fast"
         contentContainerStyle={styles.boardContent}
       >
-        {COLUMNS.map((col) => (
+        {COLUMNS.map(col => (
           <View
             key={col.id}
-            onLayout={(e) => handleLayout(col.id, e)}
+            onLayout={e => handleLayout(col.id, e)}
             style={styles.column}
           >
             <View style={[styles.header, { backgroundColor: col.color }]}>
@@ -208,13 +245,15 @@ const BoardScreen = ({ route, navigation }: any) => {
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
             >
-              {tasks[col.id].map((task) => (
+              {tasks[col.id].map(task => (
                 <DraggableCard
                   key={task.id}
                   {...task}
                   columnId={col.id}
                   onDrop={onDrop}
-                  onStatusChange={(taskId, fromCol, toCol) => moveTask(taskId, fromCol, toCol)}
+                  onStatusChange={(taskId, fromCol, toCol) =>
+                    moveTask(taskId, fromCol, toCol)
+                  }
                   onEdgeHold={handleEdgeHold}
                   onDragStart={handleDragStart}
                   onDragMove={handleDragMove}
@@ -239,8 +278,8 @@ const BoardScreen = ({ route, navigation }: any) => {
           style={[
             styles.overlayCard,
             {
-              top:  overlay.y - OVERLAY_HALF_HEIGHT,
-              left: overlay.x - (COLUMN_WIDTH / 2),
+              top: overlay.y - OVERLAY_HALF_HEIGHT,
+              left: overlay.x - COLUMN_WIDTH / 2,
             },
           ]}
         >
@@ -258,9 +297,9 @@ const BoardScreen = ({ route, navigation }: any) => {
 };
 
 const styles = StyleSheet.create({
-  container:        { flex: 1, backgroundColor: '#f8f9fa' },
+  container: { flex: 1, backgroundColor: '#f8f9fa' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadingText:      { marginTop: 12, color: '#888', fontSize: 15 },
+  loadingText: { marginTop: 12, color: '#888', fontSize: 15 },
   tabBar: {
     flexDirection: 'row',
     backgroundColor: '#fff',
@@ -268,8 +307,13 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
-  tabItem:      { flex: 1, alignItems: 'center', paddingVertical: 12, borderBottomWidth: 3 },
-  tabText:      { fontWeight: 'bold', fontSize: 13, color: '#333' },
+  tabItem: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 3,
+  },
+  tabText: { fontWeight: 'bold', fontSize: 13, color: '#333' },
   boardContent: { padding: 10 },
   column: {
     width: COLUMN_WIDTH,
@@ -285,7 +329,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  headerText:  { color: 'white', fontWeight: 'bold', fontSize: 16 },
+  headerText: { color: 'white', fontWeight: 'bold', fontSize: 16 },
   headerCount: {
     color: 'white',
     fontWeight: 'bold',
